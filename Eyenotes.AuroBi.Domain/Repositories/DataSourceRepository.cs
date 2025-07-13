@@ -20,13 +20,15 @@ namespace Eyenotes.AuroBi.Domain.Repositories
 
     public class DataSourceRepository : IDataSourceRepository
     {
+        private readonly IDynamicDbContext _dbContext;
         private readonly ILogger<DataSourceRepository> _logger;
-        private readonly EmrContext _context;
+        private readonly AuroBiContext _context;
 
-        public DataSourceRepository(ILogger<DataSourceRepository> logger, EmrContext context)
+        public DataSourceRepository(ILogger<DataSourceRepository> logger, AuroBiContext context, IDynamicDbContext dbContext)
         {
             _logger = logger;
             _context = context;
+            _dbContext = dbContext;
         }
 
         public async Task<string> GetSqlServerConnectionAsync(SqlConnectionCredentials creds)
@@ -34,8 +36,10 @@ namespace Eyenotes.AuroBi.Domain.Repositories
             var connectionString = $"Server={creds.Host},{creds.Port};Database={creds.Database};User Id={creds.Username};Password={creds.Password};Encrypt=True;TrustServerCertificate=True;";
             try
             {
-                using var conn = new SqlConnection(connectionString);
+                var conn = new SqlConnection(connectionString);
                 await conn.OpenAsync();
+                _dbContext.SetConnection(conn);
+
                 _logger.LogInformation("Connected to SQL Server successfully.");
                 return "Connected to SQL Server successfully.";
             }
@@ -51,8 +55,10 @@ namespace Eyenotes.AuroBi.Domain.Repositories
             var connectionString = $"Host={creds.Host};Port={creds.Port};Username={creds.Username};Password={creds.Password};Database={creds.Database};";
             try
             {
-                using var conn = new NpgsqlConnection(connectionString);
+                var conn = new NpgsqlConnection(connectionString);
                 await conn.OpenAsync();
+                _dbContext.SetConnection(conn);
+
                 _logger.LogInformation("Connected to PostgreSQL successfully.");
                 return "Connected to PostgreSQL successfully.";
             }
@@ -115,17 +121,17 @@ namespace Eyenotes.AuroBi.Domain.Repositories
 
             if (!columns.Any()) return "No columns found.";
 
-            var tableName = "Uploaded_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var tableName = "uploaded_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
             var sb = new StringBuilder();
-            sb.AppendLine($"CREATE TABLE [{tableName}] (");
+            sb.AppendLine($"CREATE TABLE \"{tableName}\" (");
 
             foreach (var col in columns)
             {
                 var type = string.IsNullOrWhiteSpace(col.Size) ? col.DataType : $"{col.DataType}({col.Size})";
-                sb.AppendLine($"    [{col.ColumnName}] {type},");
+                sb.AppendLine($"    \"{col.ColumnName}\" {type},");
             }
 
-            sb.Length -= 3; // Remove last comma
+            sb.Length -= 3; // remove the last comma
             sb.AppendLine("\n);");
 
             var sql = sb.ToString();

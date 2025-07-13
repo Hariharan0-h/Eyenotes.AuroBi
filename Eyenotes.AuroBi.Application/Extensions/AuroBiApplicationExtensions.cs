@@ -21,13 +21,21 @@ namespace Eyenotes.AuroBi.Application.Extensions
             )
         {
             #region ConnectionStringsInitialization
-            var connectionString = Environment.GetEnvironmentVariable("Eyenotes20_EmrConnection");
+            var EmrconnectionString = Environment.GetEnvironmentVariable("Eyenotes20_EmrConnection");
+            var AuroBiconnectionString = Environment.GetEnvironmentVariable("Eyenotes20_AuroBiConnection");
             #endregion
 
             #region DBContextInitialization
             // Register DbContext
             services.AddDbContext<EmrContext>(options =>
-                options.UseSqlServer(connectionString));
+                options.UseSqlServer(EmrconnectionString));
+
+            services.AddDbContext<AuroBiContext>(options =>
+                options.UseNpgsql(AuroBiconnectionString));
+            #endregion
+
+            #region Dynamic DB Context
+            services.AddSingleton<IDynamicDbContext, DynamicDbContext>(); 
             #endregion
 
             #region AddingRepositories

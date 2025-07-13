@@ -1,4 +1,5 @@
 ﻿using Dapper;
+using Eyenotes.AuroBi.Domain.Data;
 using Eyenotes.AuroBi.Domain.Repositories;
 using Microsoft.Extensions.Logging;
 using System;
@@ -20,11 +21,13 @@ namespace Eyenotes.AuroBi.Application.Services
     public class MetaDataService : IMetaDataService
     {
         private readonly IMetaDataRepository _repository;
+        private readonly IDynamicDbContext _dynamicDbContext;
         private readonly ILogger<MetaDataService> _logger;
 
-        public MetaDataService(IMetaDataRepository repository, ILogger<MetaDataService> logger)
+        public MetaDataService(IMetaDataRepository repository, IDynamicDbContext dynamicDbContext, ILogger<MetaDataService> logger)
         {
             _repository = repository;
+            _dynamicDbContext = dynamicDbContext;
             _logger = logger;
         }
 
@@ -32,11 +35,13 @@ namespace Eyenotes.AuroBi.Application.Services
         {
             try
             {
+                var provider = _dynamicDbContext.GetProvider();
                 var connection = _repository.GetDbConnection();
                 if (connection.State != System.Data.ConnectionState.Open)
                     await connection.OpenAsync();
 
-                var tableNames = await connection.QueryAsync<string>(SqlQueries.GetAllTables);
+                var sql = SqlQueryFactory.GetAllTables(provider);
+                var tableNames = await connection.QueryAsync<string>(sql);
                 _logger.LogInformation("Retrieved {Count} tables.", tableNames.Count());
                 return tableNames;
             }
@@ -54,22 +59,23 @@ namespace Eyenotes.AuroBi.Application.Services
 
             if (!await IsTableNameValidAsync(fullTableName))
             {
-                _logger.LogWarning("Attempt to access invalid table metadata: {TableName}", fullTableName);
+                _logger.LogWarning("Invalid table: {TableName}", fullTableName);
                 throw new ArgumentException("Invalid table name.");
             }
 
             try
             {
+                var provider = _dynamicDbContext.GetProvider();
                 var connection = _repository.GetDbConnection();
                 if (connection.State != System.Data.ConnectionState.Open)
                     await connection.OpenAsync();
 
-                var columns = await connection.QueryAsync(SqlQueries.GetColumnsByTable, new { TableName = table, SchemaName = schema });
-                return columns;
+                var sql = SqlQueryFactory.GetColumns(provider);
+                return await connection.QueryAsync(sql, new { TableName = table, SchemaName = schema });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to fetch columns for table {TableName}", fullTableName);
+                _logger.LogError(ex, "Failed to fetch columns.");
                 throw;
             }
         }
@@ -81,25 +87,23 @@ namespace Eyenotes.AuroBi.Application.Services
 
             if (!await IsTableNameValidAsync(fullTableName))
             {
-                _logger.LogWarning("Attempt to access invalid table: {TableName}", fullTableName);
+                _logger.LogWarning("Invalid table: {TableName}", fullTableName);
                 throw new ArgumentException("Invalid table name.");
             }
 
             try
             {
+                var provider = _dynamicDbContext.GetProvider();
                 var connection = _repository.GetDbConnection();
                 if (connection.State != System.Data.ConnectionState.Open)
                     await connection.OpenAsync();
 
-                var query = SqlQueries.GetDataFromTable(schema, table);
-                _logger.LogInformation("Running data query: {Query}", query);
-
-                var data = await connection.QueryAsync(query);
-                return data;
+                var sql = SqlQueryFactory.GetData(provider, schema, table);
+                return await connection.QueryAsync(sql);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to fetch data for table {TableName}", fullTableName);
+                _logger.LogError(ex, "Failed to fetch data.");
                 throw;
             }
         }
@@ -107,10 +111,7 @@ namespace Eyenotes.AuroBi.Application.Services
         public async Task<IEnumerable<dynamic>> RunQueryAsync(string query)
         {
             if (string.IsNullOrWhiteSpace(query) || !query.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("Rejected non-SELECT query: {Query}", query);
                 throw new InvalidOperationException("Only SELECT queries are allowed.");
-            }
 
             try
             {
@@ -118,12 +119,11 @@ namespace Eyenotes.AuroBi.Application.Services
                 if (connection.State != System.Data.ConnectionState.Open)
                     await connection.OpenAsync();
 
-                var data = await connection.QueryAsync(query);
-                return data;
+                return await connection.QueryAsync(query);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Query failed: {Query}", query);
+                _logger.LogError(ex, "Query failed.");
                 throw;
             }
         }
@@ -149,21 +149,48 @@ namespace Eyenotes.AuroBi.Application.Services
     }
 
     #region SQL queries
-    public static class SqlQueries
+    public static class SqlQueryFactory
     {
-        public const string GetAllTables = @"
-            SELECT TABLE_SCHEMA + '.' + TABLE_NAME AS FullTableName
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_TYPE = 'BASE TABLE'";
-
-        public const string GetColumnsByTable = @"
-            SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME = @TableName AND TABLE_SCHEMA = @SchemaName";
-
-        public static string GetDataFromTable(string schemaName, string tableName)
+        public static string GetAllTables(string provider)
         {
-            return $"SELECT * FROM [{schemaName}].[{tableName}]";
+            return provider switch
+            {
+                "SqlServer" => @"
+                    SELECT TABLE_SCHEMA + '.' + TABLE_NAME AS FullTableName
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE = 'BASE TABLE'",
+                "PostgreSQL" => @"
+                    SELECT table_schema || '.' || table_name AS FullTableName
+                    FROM information_schema.tables
+                    WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')",
+                _ => throw new NotSupportedException("Unsupported database provider")
+            };
+        }
+
+        public static string GetColumns(string provider)
+        {
+            return provider switch
+            {
+                "SqlServer" => @"
+                    SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = @TableName AND TABLE_SCHEMA = @SchemaName",
+                "PostgreSQL" => @"
+                    SELECT column_name AS COLUMN_NAME, data_type AS DATA_TYPE, character_maximum_length AS CHARACTER_MAXIMUM_LENGTH, is_nullable AS IS_NULLABLE
+                    FROM information_schema.columns
+                    WHERE table_name = @TableName AND table_schema = @SchemaName",
+                _ => throw new NotSupportedException("Unsupported database provider")
+            };
+        }
+
+        public static string GetData(string provider, string schemaName, string tableName)
+        {
+            return provider switch
+            {
+                "SqlServer" => $"SELECT * FROM [{schemaName}].[{tableName}]",
+                "PostgreSQL" => $"SELECT * FROM \"{schemaName}\".\"{tableName}\"",
+                _ => throw new NotSupportedException("Unsupported database provider")
+            };
         }
     }
     #endregion

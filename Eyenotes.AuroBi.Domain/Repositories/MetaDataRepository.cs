@@ -16,16 +16,16 @@ namespace Eyenotes.AuroBi.Domain.Repositories
 
     public class MetaDataRepository : IMetaDataRepository
     {
-        private readonly EmrContext _context;
+        private readonly IDynamicDbContext _context;
 
-        public MetaDataRepository(EmrContext context)
+        public MetaDataRepository(IDynamicDbContext context)
         {
             _context = context;
         }
 
         public DbConnection GetDbConnection()
         {
-            return _context.Database.GetDbConnection();
+            return _context.GetConnection(); 
         }
     }
 }
