@@ -21,5 +21,29 @@ namespace Eyenotes.AuroBi.Api.Controllers
             var tables = await _metaDataService.GetAllTableNamesAsync();
             return Ok(tables);
         }
+
+        [HttpGet("columns/{tableName}")]
+        public async Task<IActionResult> GetTableColumns(string tableName)
+        {
+            var columns = await _metaDataService.GetTableColumnsAsync(tableName);
+            return Ok(columns);
+        }
+
+        [HttpGet("data/{tableName}")]
+        public async Task<IActionResult> GetTableData(string tableName)
+        {
+            var data = await _metaDataService.GetTableDataAsync(tableName);
+            return Ok(data);
+        }
+
+        [HttpPost("run-query")]
+        public async Task<IActionResult> RunQuery([FromBody] string query)
+        {
+            if (!query.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+                return BadRequest("Only SELECT queries are allowed.");
+
+            var result = await _metaDataService.RunQueryAsync(query);
+            return Ok(result);
+        }
     }
 }

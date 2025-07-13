@@ -32,6 +32,7 @@ namespace Eyenotes.AuroBi.Application.Extensions
 
             #region AddingRepositories
             services.AddScoped<IMetaDataRepository, MetaDataRepository>();
+            services.AddScoped<IDataSourceRepository, DataSourceRepository>();
             #endregion
 
             #region AddingServices
