@@ -45,6 +45,7 @@ namespace Eyenotes.AuroBi.Application.Extensions
 
             #region AddingServices
             services.AddScoped<IMetaDataService, MetaDataService>();
+            services.AddScoped<IDataSourceService, DataSourceService>();
             #endregion
 
             return services;
