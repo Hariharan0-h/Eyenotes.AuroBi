@@ -131,14 +131,32 @@ namespace Eyenotes.AuroBi.Domain.Repositories
                 sb.AppendLine($"    \"{col.ColumnName}\" {type},");
             }
 
-            sb.Length -= 3; // remove the last comma
+            sb.Length -= 3;
             sb.AppendLine("\n);");
 
             var sql = sb.ToString();
 
             try
             {
-                await _context.Database.ExecuteSqlRawAsync(sql);
+                var AuroBiconnectionString = Environment.GetEnvironmentVariable("Eyenotes20_AuroBiConnection");
+                if (string.IsNullOrEmpty(AuroBiconnectionString))
+                {
+                    _logger.LogError("Environment variable 'Eyenotes20_AuroBiConnection' is missing.");
+                    return "AuroBi connection string is not set in environment variables.";
+                }
+
+                var envConn = new NpgsqlConnection(AuroBiconnectionString);
+                await envConn.OpenAsync();
+                _dbContext.SetConnection(envConn);
+                _logger.LogInformation("Dynamic DB connection set from environment variable.");
+
+                using var cmd = _dbContext.GetConnection().CreateCommand();
+                cmd.CommandText = sql;
+                await cmd.ExecuteNonQueryAsync();
+
+                var currconn = _dbContext.GetConnection();
+                _logger.LogInformation("Table created successfully using DB Connection: {ConnectionString}", currconn.ConnectionString);
+
                 return $"Table '{tableName}' created successfully.";
             }
             catch (Exception ex)
