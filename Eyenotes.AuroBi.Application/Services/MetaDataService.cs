@@ -42,6 +42,7 @@ namespace Eyenotes.AuroBi.Application.Services
 
                 var sql = SqlQueryFactory.GetAllTables(provider);
                 var tableNames = await connection.QueryAsync<string>(sql);
+                connection.Close();
                 _logger.LogInformation("Retrieved {Count} tables.", tableNames.Count());
                 return tableNames;
             }
@@ -71,7 +72,9 @@ namespace Eyenotes.AuroBi.Application.Services
                     await connection.OpenAsync();
 
                 var sql = SqlQueryFactory.GetColumns(provider);
-                return await connection.QueryAsync(sql, new { TableName = table, SchemaName = schema });
+                var data = await connection.QueryAsync(sql, new { TableName = table, SchemaName = schema });
+                connection.Close();
+                return data;
             }
             catch (Exception ex)
             {
@@ -99,7 +102,9 @@ namespace Eyenotes.AuroBi.Application.Services
                     await connection.OpenAsync();
 
                 var sql = SqlQueryFactory.GetData(provider, schema, table);
-                return await connection.QueryAsync(sql);
+                var data = await connection.QueryAsync(sql);
+                connection.Close();
+                return data;
             }
             catch (Exception ex)
             {
@@ -118,8 +123,9 @@ namespace Eyenotes.AuroBi.Application.Services
                 var connection = _repository.GetDbConnection();
                 if (connection.State != System.Data.ConnectionState.Open)
                     await connection.OpenAsync();
-
-                return await connection.QueryAsync(query);
+                var data = await connection.QueryAsync(query);
+                connection.Close();
+                return data;
             }
             catch (Exception ex)
             {

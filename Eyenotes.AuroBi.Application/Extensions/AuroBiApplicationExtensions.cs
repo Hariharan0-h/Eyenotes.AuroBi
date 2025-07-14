@@ -35,7 +35,7 @@ namespace Eyenotes.AuroBi.Application.Extensions
             #endregion
 
             #region Dynamic DB Context
-            services.AddSingleton<IDynamicDbContext, DynamicDbContext>(); 
+            services.AddSingleton<IDynamicDbContext, DynamicDbContext>();
             #endregion
 
             #region AddingRepositories
