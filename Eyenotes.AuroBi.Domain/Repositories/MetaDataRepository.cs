@@ -1,31 +1,37 @@
 ﻿using Eyenotes.AuroBi.Domain.Data;
-using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
 using System.Data.Common;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Eyenotes.AuroBi.Domain.Repositories
 {
     public interface IMetaDataRepository
     {
-        DbConnection GetDbConnection();
+        Task<DbConnection> GetDbConnectionAsync();
+        string GetProvider();
+        Task<bool> TestConnectionAsync();
     }
 
     public class MetaDataRepository : IMetaDataRepository
     {
-        private readonly IDynamicDbContext _context;
+        private readonly IConnectionManager _connectionManager;
 
-        public MetaDataRepository(IDynamicDbContext context)
+        public MetaDataRepository(IConnectionManager connectionManager)
         {
-            _context = context;
+            _connectionManager = connectionManager;
         }
 
-        public DbConnection GetDbConnection()
+        public async Task<DbConnection> GetDbConnectionAsync()
         {
-            return _context.GetConnection(); 
+            return await _connectionManager.GetConnectionAsync();
+        }
+
+        public string GetProvider()
+        {
+            return _connectionManager.GetProvider();
+        }
+
+        public async Task<bool> TestConnectionAsync()
+        {
+            return await _connectionManager.TestConnectionAsync();
         }
     }
 }

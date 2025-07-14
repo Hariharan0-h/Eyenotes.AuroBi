@@ -1,54 +1,43 @@
 ﻿using Dapper;
-using Eyenotes.AuroBi.Domain.Data;
 using Eyenotes.AuroBi.Domain.Repositories;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Eyenotes.AuroBi.Application.Services
 {
     public interface IMetaDataService
     {
         Task<IEnumerable<string>> GetAllTableNamesAsync();
-        Task<IEnumerable<object>> GetTableColumnsAsync(string fullTableName); // expects "schema.table"
-        Task<IEnumerable<dynamic>> GetTableDataAsync(string fullTableName);   // expects "schema.table"
+        Task<IEnumerable<object>> GetTableColumnsAsync(string fullTableName);
+        Task<IEnumerable<dynamic>> GetTableDataAsync(string fullTableName);
         Task<IEnumerable<dynamic>> RunQueryAsync(string query);
+        Task<bool> TestConnectionAsync();
     }
 
     public class MetaDataService : IMetaDataService
     {
         private readonly IMetaDataRepository _repository;
-        private readonly IDynamicDbContext _dynamicDbContext;
         private readonly ILogger<MetaDataService> _logger;
 
-        public MetaDataService(IMetaDataRepository repository, IDynamicDbContext dynamicDbContext, ILogger<MetaDataService> logger)
+        public MetaDataService(IMetaDataRepository repository, ILogger<MetaDataService> logger)
         {
             _repository = repository;
-            _dynamicDbContext = dynamicDbContext;
             _logger = logger;
         }
 
         public async Task<IEnumerable<string>> GetAllTableNamesAsync()
         {
+            using var connection = await _repository.GetDbConnectionAsync();
             try
             {
-                var provider = _dynamicDbContext.GetProvider();
-                var connection = _repository.GetDbConnection();
-                if (connection.State != System.Data.ConnectionState.Open)
-                    await connection.OpenAsync();
-
+                var provider = _repository.GetProvider();
                 var sql = SqlQueryFactory.GetAllTables(provider);
                 var tableNames = await connection.QueryAsync<string>(sql);
-                connection.Close();
-                _logger.LogInformation("Retrieved {Count} tables.", tableNames.Count());
+                _logger.LogInformation("Retrieved {Count} tables", tableNames.Count());
                 return tableNames;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to fetch table names.");
+                _logger.LogError(ex, "Failed to fetch table names");
                 throw;
             }
         }
@@ -56,29 +45,25 @@ namespace Eyenotes.AuroBi.Application.Services
         public async Task<IEnumerable<object>> GetTableColumnsAsync(string fullTableName)
         {
             if (!TryParseSchemaTable(fullTableName, out var schema, out var table))
-                throw new ArgumentException("Invalid format. Use 'schema.table'.");
+                throw new ArgumentException("Invalid format. Use 'schema.table'");
 
             if (!await IsTableNameValidAsync(fullTableName))
             {
                 _logger.LogWarning("Invalid table: {TableName}", fullTableName);
-                throw new ArgumentException("Invalid table name.");
+                throw new ArgumentException("Invalid table name");
             }
 
+            using var connection = await _repository.GetDbConnectionAsync();
             try
             {
-                var provider = _dynamicDbContext.GetProvider();
-                var connection = _repository.GetDbConnection();
-                if (connection.State != System.Data.ConnectionState.Open)
-                    await connection.OpenAsync();
-
+                var provider = _repository.GetProvider();
                 var sql = SqlQueryFactory.GetColumns(provider);
                 var data = await connection.QueryAsync(sql, new { TableName = table, SchemaName = schema });
-                connection.Close();
                 return data;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to fetch columns.");
+                _logger.LogError(ex, "Failed to fetch columns for table {TableName}", fullTableName);
                 throw;
             }
         }
@@ -86,29 +71,25 @@ namespace Eyenotes.AuroBi.Application.Services
         public async Task<IEnumerable<dynamic>> GetTableDataAsync(string fullTableName)
         {
             if (!TryParseSchemaTable(fullTableName, out var schema, out var table))
-                throw new ArgumentException("Invalid format. Use 'schema.table'.");
+                throw new ArgumentException("Invalid format. Use 'schema.table'");
 
             if (!await IsTableNameValidAsync(fullTableName))
             {
                 _logger.LogWarning("Invalid table: {TableName}", fullTableName);
-                throw new ArgumentException("Invalid table name.");
+                throw new ArgumentException("Invalid table name");
             }
 
+            using var connection = await _repository.GetDbConnectionAsync();
             try
             {
-                var provider = _dynamicDbContext.GetProvider();
-                var connection = _repository.GetDbConnection();
-                if (connection.State != System.Data.ConnectionState.Open)
-                    await connection.OpenAsync();
-
+                var provider = _repository.GetProvider();
                 var sql = SqlQueryFactory.GetData(provider, schema, table);
                 var data = await connection.QueryAsync(sql);
-                connection.Close();
                 return data;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to fetch data.");
+                _logger.LogError(ex, "Failed to fetch data for table {TableName}", fullTableName);
                 throw;
             }
         }
@@ -116,28 +97,45 @@ namespace Eyenotes.AuroBi.Application.Services
         public async Task<IEnumerable<dynamic>> RunQueryAsync(string query)
         {
             if (string.IsNullOrWhiteSpace(query) || !query.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Only SELECT queries are allowed.");
+                throw new InvalidOperationException("Only SELECT queries are allowed");
 
+            using var connection = await _repository.GetDbConnectionAsync();
             try
             {
-                var connection = _repository.GetDbConnection();
-                if (connection.State != System.Data.ConnectionState.Open)
-                    await connection.OpenAsync();
                 var data = await connection.QueryAsync(query);
-                connection.Close();
                 return data;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Query failed.");
+                _logger.LogError(ex, "Query execution failed: {Query}", query);
                 throw;
+            }
+        }
+
+        public async Task<bool> TestConnectionAsync()
+        {
+            try
+            {
+                return await _repository.TestConnectionAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Connection test failed");
+                return false;
             }
         }
 
         private async Task<bool> IsTableNameValidAsync(string fullTableName)
         {
-            var validTableNames = await GetAllTableNamesAsync();
-            return validTableNames.Contains(fullTableName, StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var validTableNames = await GetAllTableNamesAsync();
+                return validTableNames.Contains(fullTableName, StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private bool TryParseSchemaTable(string fullTableName, out string schema, out string table)
@@ -154,7 +152,7 @@ namespace Eyenotes.AuroBi.Application.Services
         }
     }
 
-    #region SQL queries
+    // SqlQueryFactory remains the same
     public static class SqlQueryFactory
     {
         public static string GetAllTables(string provider)
@@ -199,5 +197,4 @@ namespace Eyenotes.AuroBi.Application.Services
             };
         }
     }
-    #endregion
 }
