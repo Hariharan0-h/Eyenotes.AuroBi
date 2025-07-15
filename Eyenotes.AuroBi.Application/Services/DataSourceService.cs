@@ -68,6 +68,11 @@ namespace Eyenotes.AuroBi.Application.Services
             schemaSheet.Cell(4, 4).Value = "FALSE";
             schemaSheet.Cell(4, 5).Value = "TRUE";
 
+            var reportConfigSheet = workbook.Worksheets.Add("Report"); 
+            reportConfigSheet.Cell(1, 1).Value = "Id";
+            reportConfigSheet.Cell(1, 2).Value = "Report Name";
+            reportConfigSheet.Cell(1, 3).Value = "Report Query";
+
             using var ms = new MemoryStream();
             workbook.SaveAs(ms);
             return await Task.FromResult(ms.ToArray());
@@ -214,7 +219,22 @@ namespace Eyenotes.AuroBi.Application.Services
                         }
 
                         if (pkIndexes.Contains(i)) pkKey.Append(val).Append("|");
-                        values.Add(string.IsNullOrEmpty(val) ? "NULL" : $"'{val.Replace("'", "''")}'");
+                        if (string.IsNullOrEmpty(val))
+                        {
+                            values.Add("NULL");
+                        }
+                        else
+                        {
+                            if (DateTime.TryParse(val, out var dt))
+                            {
+                                if (schemaCol.DataType == "DATE")
+                                    val = dt.ToString("yyyy-MM-dd");
+                                else if (schemaCol.DataType == "TIMESTAMP")
+                                    val = dt.ToString("yyyy-MM-dd HH:mm:ss");
+                            }
+
+                            values.Add($"'{val.Replace("'", "''")}'");
+                        }
                     }
 
                     if (hasError)
@@ -249,15 +269,87 @@ namespace Eyenotes.AuroBi.Application.Services
                     rowIdx++;
                 }
 
+                if (workbook.Worksheets.Contains("Report"))
+                {
+                    var reportSheet = workbook.Worksheet("Report");
+
+                    // Read header
+                    var idHeader = reportSheet.Cell(1, 1).GetString().Trim().ToLower();
+                    var nameHeader = reportSheet.Cell(1, 2).GetString().Trim().ToLower();
+                    var queryHeader = reportSheet.Cell(1, 3).GetString().Trim().ToLower();
+
+                    if (idHeader != "id" || nameHeader != "report name" || queryHeader != "report query")
+                    {
+                        errors.Add("Report sheet must have headers: id, Report Name, Report Query");
+                    }
+                    else
+                    {
+                        int reportRow = 2;
+                        while (!reportSheet.Row(reportRow).IsEmpty())
+                        {
+                            string idStr = reportSheet.Cell(reportRow, 1).GetString().Trim();
+                            string reportName = reportSheet.Cell(reportRow, 2).GetString().Trim();
+                            string reportQuery = reportSheet.Cell(reportRow, 3).GetString().Trim();
+
+                            if (!int.TryParse(idStr, out var reportId))
+                            {
+                                errors.Add($"Report Row {reportRow}: Invalid id '{idStr}'");
+                                reportRow++;
+                                continue;
+                            }
+
+                            if (string.IsNullOrWhiteSpace(reportName) || string.IsNullOrWhiteSpace(reportQuery))
+                            {
+                                errors.Add($"Report Row {reportRow}: Report Name and Query cannot be empty");
+                                reportRow++;
+                                continue;
+                            }
+
+                            try
+                            {
+                                var insertReportSql = $@"
+                    INSERT INTO report_config (id, report_name, report_query)
+                    VALUES (@id, @name, @query);";
+
+                                using var reportCmd = conn.CreateCommand();
+                                reportCmd.CommandText = insertReportSql;
+                                var paramId = reportCmd.CreateParameter();
+                                paramId.ParameterName = "id";
+                                paramId.Value = reportId;
+                                reportCmd.Parameters.Add(paramId);
+
+                                var paramName = reportCmd.CreateParameter();
+                                paramName.ParameterName = "name";
+                                paramName.Value = reportName;
+                                reportCmd.Parameters.Add(paramName);
+
+                                var paramQuery = reportCmd.CreateParameter();
+                                paramQuery.ParameterName = "query";
+                                paramQuery.Value = reportQuery;
+                                reportCmd.Parameters.Add(paramQuery);
+
+                                await reportCmd.ExecuteNonQueryAsync();
+                            }
+                            catch (Exception ex)
+                            {
+                                errors.Add($"Report Row {reportRow}: Insert failed - {ex.Message}");
+                                _logger.LogError(ex, "Failed to insert report row {ReportRow}", reportRow);
+                            }
+
+                            reportRow++;
+                        }
+                    }
+                }
+
                 if (errors.Any())
                 {
                     var errorSummary = errors.Count > 10 ?
                         string.Join("\n", errors.Take(10)) + $"\n... and {errors.Count - 10} more errors" :
                         string.Join("\n", errors);
-                    return $"Table '{tableName}' created with {insertCount} rows inserted, but {errors.Count} issue(s):\n{errorSummary}";
+                    return $"Table '{tableName}' created with {insertCount} rows inserted. Some issues occurred:\n{errorSummary}";
                 }
 
-                return $"Table '{tableName}' created and {insertCount} row(s) inserted successfully.";
+                return $"Table '{tableName}' created and {insertCount} row(s) inserted successfully. Report config entries inserted if present.";
             }
             catch (Exception ex)
             {

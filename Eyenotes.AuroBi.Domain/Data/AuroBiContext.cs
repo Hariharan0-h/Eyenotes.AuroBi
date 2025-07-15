@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using DocumentFormat.OpenXml.Bibliography;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,6 +12,7 @@ namespace Eyenotes.AuroBi.Domain.Data
     {
         public AuroBiContext(DbContextOptions<AuroBiContext> options) : base(options)
         {
+            
         }
     }
 }
